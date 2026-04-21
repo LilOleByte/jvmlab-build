@@ -1,10 +1,8 @@
 # jvmlab-build
 
-**[JVMLAB.org](https://jvmlab.org/)** — a single-script pipeline that builds a tiny, bootable live Linux ISO (kernel, userspace, ISOLINUX).
+**[JVMLAB.org](https://jvmlab.org/)** — a single-script pipeline that builds a tiny, bootable live Linux ISO (kernel, userspace, ISOLINUX). This tree is `minimal.sh`, `clean.sh`, and related tooling.
 
-This repository holds `minimal.sh`, `clean.sh`, and related tooling.
-
-**jvmlab-toybox** (the static C multicall userspace) is a **separate Git repository**. The build clones it when you run `minimal.sh`; override the URL or ref with `JVMLAB_TOYBOX_URL` and `JVMLAB_TOYBOX_REF` if needed. Source layout in this tree is only for local development if you vendor or symlink a copy.
+**Userspace** comes from **[jvmlab-toybox](https://github.com/LilOleByte/jvmlab-toybox)** — a separate repository. `minimal.sh` clones it at build time; use `JVMLAB_TOYBOX_URL` and `JVMLAB_TOYBOX_REF` to override. A `jvmlab-toybox/` directory here is only for local development (vendor or symlink).
 
 ## What the build does
 
@@ -29,7 +27,7 @@ Why a custom multicall instead of upstream Toybox:
 - **Simple dispatcher** — `main()` maps `basename(argv[0])` to a fixed table; no `setjmp`/`longjmp` or mutable global state that nested shells can corrupt.
 - **Easy to review** — one short C file per applet; add a source file and one table entry.
 
-Details: [`jvmlab-toybox/README.md`](jvmlab-toybox/README.md) (present after clone or if you have the repo alongside this tree).
+Details: [jvmlab-toybox README](https://github.com/LilOleByte/jvmlab-toybox/blob/main/README.md) (or `jvmlab-toybox/README.md` after clone / local checkout).
 
 ## Requirements
 
@@ -43,8 +41,10 @@ The build does **not** require root.
 
 ## Build
 
-From this repository:
+Clone and run:
 
+    git clone https://github.com/LilOleByte/jvmlab-build.git
+    cd jvmlab-build
     ./minimal.sh
 
 Output: **`minimal.iso`** in the project directory.
