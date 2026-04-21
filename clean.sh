@@ -1,0 +1,10 @@
+#!/bin/sh
+# Remove everything ./minimal.sh downloads, clones, extracts, and builds.
+# Runs from any directory; always cleans relative to this script.
+set -eu
+cd "$(dirname "$0")" || exit 1
+
+# Extracted trees, cloned sources, generated rootfs and ISO image.
+rm -rf rootfs isoimage linux-* syslinux-* jvmlab-toybox-src *.iso
+
+rm -f kernel.tar.xz syslinux.tar.xz jvmlab-toybox.tar.gz
