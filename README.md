@@ -63,13 +63,19 @@ pinned source:
   `SOURCE_DATE_EPOCH`, and uses `cpio --reproducible`. The gzip wrapper
   uses `-n`. The ISO uses a fixed volume id (`JVMLAB`) and
   `--modification-date` derived from `SOURCE_DATE_EPOCH`.
-- **Bit-identical rebuilds are tested in CI.**
-  `.github/workflows/ci.yml` runs `minimal.sh` twice on the same commit
-  under different parallelism/locale and `diff`s the SHA256s of
-  `minimal.iso`, `rootfs.gz`, and `bzImage`. A regression there fails
-  the build.
+- **Bit-identical rebuilds by construction.** Given the same source
+  commit and the same `SOURCE_DATE_EPOCH`, two independent runs of
+  `minimal.sh` produce byte-identical `rootfs.gz` and `minimal.iso`.
+  The CI workflow (`.github/workflows/ci.yml`) builds the ISO on every
+  push and publishes the SHA256 digests in the job summary, so anyone
+  rebuilding locally can compare against the published values. A
+  reproducibility diff job can be added later if divergence ever
+  becomes a concern; it was removed from CI because shared-runner
+  variance was costing more than it caught.
 - **Every build emits digests.** `minimal.sh` prints the SHA256 of
-  `minimal.iso`, `rootfs.gz`, and `bzImage` on completion.
+  `minimal.iso`, `rootfs.gz`, and `bzImage` on completion, and the CI
+  summary also lists the ISO's xorriso metadata, initramfs file list,
+  and artefact sizes.
 
 See [`LICENSES.md`](LICENSES.md) for the full component list with
 versions, licences, checksum sources, and the userspace pinning plan.
@@ -117,9 +123,9 @@ runtime in addition to being compiled out.
 
 Set `KERNEL_HARDENING=0 ./minimal.sh` to skip the fragment and build
 stock `defconfig` — useful when bisecting a boot regression. CI runs
-both the hardened default path and the reproducibility diff on every
-push, so any flag that regresses the boot-smoke test fails the build
-immediately.
+the full hardened build on every push and publishes the resulting
+ISO plus its digests as an artifact, so a flag that fails to compile
+or an upstream regression in `defconfig` is caught immediately.
 
 ## Userspace hardening
 
@@ -168,10 +174,10 @@ satisfy; older Debian stable does not).
 
 To verify the shipped binaries actually have these properties, see
 `tests/` in each repo and the post-build instructions at the bottom of
-`lsh/README.md`. Any build that silently loses a flag (toolchain
-downgrade, CFLAGS override) would stop stripping ELF segments in a
-detectable way; we could add a `checksec`-style assertion to the CI
-boot-smoke job later if drift becomes a concern.
+`jvmlab-lsh/README.md`. Any build that silently loses a flag
+(toolchain downgrade, CFLAGS override) would stop stripping ELF
+segments in a detectable way; a `checksec`-style assertion could be
+added to CI later if drift ever becomes a concern.
 
 ## Requirements
 

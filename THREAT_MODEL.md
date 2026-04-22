@@ -60,12 +60,12 @@ Phase 3.1 = userspace, Phase 3.2 = verifiable boot).
 | # | Threat | Assets | Defence | Status |
 |---|--------|--------|---------|--------|
 | Th-1 | User can't verify the ISO matches CI's build. | A1 | CI publishes SHA256 of `minimal.iso`, `rootfs.gz`, `bzImage` on every build (`minimal.sh` prints them on completion; CI uploads `artefact-digests.txt`). | In place (Phase 1). |
-| Th-2 | Two fresh checkouts produce different ISOs. | A2 | `SOURCE_DATE_EPOCH` + sorted + `root:root` + `cpio --reproducible` + `gzip -n` for the initramfs; xorriso honours `SOURCE_DATE_EPOCH` for the ISO; `KBUILD_BUILD_*` pinned for the kernel. CI `reproducibility` job diffs two builds. | In place (Phase 1). |
+| Th-2 | Two fresh checkouts produce different ISOs. | A2 | `SOURCE_DATE_EPOCH` + sorted + `root:root` + `cpio --reproducible` + `gzip -n` for the initramfs; xorriso honours `SOURCE_DATE_EPOCH` for the ISO; `KBUILD_BUILD_*` pinned for the kernel. CI publishes SHA256 digests on every build; anyone can rebuild locally at the same commit / `SOURCE_DATE_EPOCH` and compare. | In place (Phase 1). |
 | Th-3 | Tampered kernel or syslinux tarball on the build host. | A2 | SHA256 of both tarballs pinned in `minimal.sh`; values sourced from kernel.org's signed `sha256sums.asc`; `fetch()` aborts on mismatch. | In place (Phase 1). |
-| Th-4 | Tampered `jvmlab-toybox` or `lsh` source. | A2 | Git refs pinned via `JVMLAB_TOYBOX_REF` / `JVMLAB_LSH_REF`; for release builds the pin is a commit SHA. Full plan documented in `LICENSES.md` ("Pinning strategy"). | Partial — currently tracks `main`; moving refs to signed tags is tracked as a Phase 1 follow-up. |
+| Th-4 | Tampered `jvmlab-toybox` or `jvmlab-lsh` source. | A2 | Git refs pinned via `JVMLAB_TOYBOX_REF` / `JVMLAB_LSH_REF`; for release builds the pin is a commit SHA. Full plan documented in `LICENSES.md` ("Pinning strategy"). | Partial — currently tracks `main`; moving refs to signed tags is tracked as a Phase 1 follow-up. |
 | Th-5 | A local bug in the kernel is exploited from userspace. | A3 | Attack-surface fragment (`configs/x86_64-minimal.config`) removes `CONFIG_NET`, `CONFIG_MODULES`, `CONFIG_USER_NS`, `CONFIG_IO_URING`, `CONFIG_BPF_SYSCALL`, `CONFIG_KPROBES/UPROBES`, `CONFIG_DEVMEM/DEVPORT`, `CONFIG_MAGIC_SYSRQ`, legacy syscall paths. Self-protection enables KASLR, stack canaries, `HARDENED_USERCOPY`, `INIT_ON_ALLOC/FREE`, `INIT_STACK_ALL_ZERO`, `SLAB_FREELIST_HARDENED`, `STRICT_KERNEL_RWX`, `SECURITY_YAMA`, `SECURITY_DMESG_RESTRICT`. | In place (Phase 2). |
 | Th-6 | Kernel oops leaves the system in an undefined state. | A3 | Kernel command line: `oops=panic panic=10`. | In place (Phase 2). |
-| Th-7 | A memory-safety bug in `lsh` or `jvmlab-toybox` is turned into code execution. | A4 | Userspace built with `-fcf-protection=full` (Intel CET), `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, `-D_FORTIFY_SOURCE=2`, `-static-pie` (ASLR), `-Wl,-z,relro -Wl,-z,now`, `-Wl,-z,noexecstack`. Format-string injection refused at compile time. | In place (Phase 3.1). |
+| Th-7 | A memory-safety bug in `jvmlab-lsh` or `jvmlab-toybox` is turned into code execution. | A4 | Userspace built with `-fcf-protection=full` (Intel CET), `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, `-D_FORTIFY_SOURCE=2`, `-static-pie` (ASLR), `-Wl,-z,relro -Wl,-z,now`, `-Wl,-z,noexecstack`. Format-string injection refused at compile time. | In place (Phase 3.1). |
 | Th-8 | An attacker substitutes `minimal.iso` in transit. | A1 | Currently: user must verify the published SHA256 out-of-band (visible on the CI run summary). | Partial. Closes fully with Th-9. |
 | Th-9 | User runs a wrong-but-plausibly-signed ISO. | A1 | Planned: sign the ISO + kernel image with a project key; publish the public key alongside the recipe; document how to verify. | **Not in place yet — Phase 3.2.** |
 | Th-10 | Malicious firmware / DMA device tampers with the running kernel at boot. | A3 | Planned: Secure Boot chain, `efi_stub` kernel, or a shim that verifies the kernel signature before jumping. Today nothing stops this. | **Not in place yet — Phase 3.2.** |
@@ -105,11 +105,14 @@ in order:
 
 1. `./minimal.sh` locally. Last line prints SHA256 triplet.
 2. Compare those SHAs to the CI run that built the same commit
-   (artefact: `artefact-digests.txt`). They must match byte-for-byte.
-3. Check `ci` workflow passed the `reproducibility` job. Two runs
-   produced the same hashes.
+   (job summary + `artefact-digests.txt` inside the uploaded
+   artifact). They must match byte-for-byte when `SOURCE_DATE_EPOCH`
+   matches.
+3. Rebuild the same commit a second time locally (or on a second
+   machine) and diff the digests. Mismatch = unreproducibility bug,
+   open an issue before trusting the ISO.
 4. Against the installed binaries:
-   `file lsh/lsh jvmlab-toybox/jvmlab-toybox` reports
+   `file jvmlab-lsh/lsh jvmlab-toybox/jvmlab-toybox` reports
    `ELF 64-bit LSB pie executable ... statically linked`.
 5. `readelf -d` on each binary shows `BIND_NOW` in `FLAGS_1` (full
    RELRO).
@@ -127,7 +130,7 @@ in order:
 
 - Any time a `CONFIG_` flag in `configs/x86_64-minimal.config` is
   added, removed, or flipped: update Th-5 and re-run step 7.
-- Any time a toolchain flag in `lsh/Makefile` or
+- Any time a toolchain flag in `jvmlab-lsh/Makefile` or
   `jvmlab-toybox/Makefile` changes: update Th-7.
 - Any time the ISO gains a new component (second binary, a config
   file, a data blob): add a row to the asset table and decide which

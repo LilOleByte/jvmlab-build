@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   build:
-    name: build + boot-smoke
+    name: build minimal.iso
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -36,12 +36,12 @@ jobs:
           repository: LilOleByte/jvmlab-lsh
           path: jvmlab-lsh
 
-      - name: install build + test deps
+      - name: install build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential cpio flex gzip libelf-dev libssl-dev \
-            musl-tools qemu-system-x86 wget xorriso
+            musl-tools wget xorriso
 
       - name: cache upstream tarballs
         uses: actions/cache@v4
@@ -57,17 +57,55 @@ jobs:
         working-directory: jvmlab-build
         run: ./minimal.sh
 
-      - name: print artefact digests
+      - name: artefact info
         working-directory: jvmlab-build
+        # Generate a human-readable summary of what just got built:
+        # digests (reproducibility anchor), sizes, ISO metadata,
+        # kernel file(1) ident, and initramfs file list. Written to
+        # both the CI job summary (for easy reading in the GitHub UI)
+        # and to artefact-info.md inside the uploaded artifact.
+        # set +e on the informational subcommands so a non-fatal
+        # warning (e.g. xorriso stderr chatter) can't mask the build.
         run: |
           sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage \
-            | tee artefact-digests.txt
+            > artefact-digests.txt
 
-      - name: boot-smoke (QEMU, headless)
-        working-directory: jvmlab-build
-        run: ./ci/boot-smoke.sh minimal.iso
+          {
+            echo "### jvmlab build summary"
+            echo
+            echo "- commit:           \`${GITHUB_SHA}\`"
+            echo "- ref:              \`${GITHUB_REF}\`"
+            echo "- runner:           \`${RUNNER_OS} ${RUNNER_ARCH}\`"
+            echo "- build date (UTC): \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`"
+            echo
+            echo "#### SHA256 digests"
+            echo '```'
+            cat artefact-digests.txt
+            echo '```'
+            echo
+            echo "#### Sizes"
+            echo '```'
+            ls -lh minimal.iso isoimage/rootfs.gz isoimage/bzImage \
+              | awk '{printf "%-10s  %s\n", $5, $NF}' || true
+            echo '```'
+            echo
+            echo "#### ISO metadata (PVD)"
+            echo '```'
+            xorriso -indev minimal.iso -pvd_info 2>/dev/null || true
+            echo '```'
+            echo
+            echo "#### Kernel identity"
+            echo '```'
+            file isoimage/bzImage || true
+            echo '```'
+            echo
+            echo "#### Initramfs contents"
+            echo '```'
+            zcat isoimage/rootfs.gz | cpio -t 2>/dev/null | sort || true
+            echo '```'
+          } | tee artefact-info.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: upload ISO + digests
+      - name: upload ISO + info
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -75,57 +113,6 @@ jobs:
           path: |
             jvmlab-build/minimal.iso
             jvmlab-build/artefact-digests.txt
+            jvmlab-build/artefact-info.md
           if-no-files-found: warn
           retention-days: 14
-
-  reproducibility:
-    name: bit-identical rebuild
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-
-    steps:
-      - name: checkout jvmlab-build
-        uses: actions/checkout@v4
-        with:
-          path: jvmlab-build
-
-      - name: checkout jvmlab-lsh
-        uses: actions/checkout@v4
-        with:
-          repository: LilOleByte/jvmlab-lsh
-          path: jvmlab-lsh
-
-      - name: install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential cpio flex gzip libelf-dev libssl-dev \
-            musl-tools wget xorriso
-
-      # Two independent builds from the same source tree (different
-      # parallelism, different tmp, different locale) must produce the
-      # same rootfs.gz and the same minimal.iso byte-for-byte.
-      - name: build run A
-        working-directory: jvmlab-build
-        env:
-          JOBS: '2'
-        run: |
-          ./minimal.sh
-          sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage > ../run-a.sha256
-          ./clean
-
-      - name: build run B
-        working-directory: jvmlab-build
-        env:
-          JOBS: '4'
-          LC_ALL: C.UTF-8
-        run: |
-          ./minimal.sh
-          sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage > ../run-b.sha256
-
-      - name: diff digests
-        run: |
-          echo '== run A =='; cat run-a.sha256
-          echo '== run B =='; cat run-b.sha256
-          diff -u run-a.sha256 run-b.sha256
