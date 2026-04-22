@@ -46,7 +46,7 @@ that would require a DRM-style model.
 | T3 | **Local console user** | Runs the ISO on real hardware; can type arbitrary input; can plug in removable media. |
 | T4 | **In-transit tamperer** | Substitutes a different `minimal.iso` between CI's release page and the user (e.g., compromised mirror, MITM on HTTP). |
 | T5 | **Upstream mirror compromise** | Replaces `linux-6.18.23.tar.xz` or `syslinux-6.03.tar.xz` on `cdn.kernel.org` or a CI-reachable mirror with a tampered tarball. |
-| T6 | **Upstream repo compromise** | Pushes a malicious commit to `LilOleByte/jvmlab-toybox` or `LilOleByte/lsh` upstream. |
+| T6 | **Upstream repo compromise** | Pushes a malicious commit to `LilOleByte/jvmlab-toybox` or `LilOleByte/jvmlab-lsh` upstream. |
 | T7 | **Compromised build host** | Runs the build with a backdoored `gcc`, `musl-gcc`, or `xorriso`. |
 | T8 | **Physical attacker** | DMA, DRAM probes, JTAG, flash reprogramming. Full hardware access. |
 

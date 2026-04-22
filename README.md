@@ -5,9 +5,9 @@
 **Userspace** is split across two sibling repositories:
 
 - **[jvmlab-toybox](https://github.com/LilOleByte/jvmlab-toybox)** — static multicall binary for the non-shell applets.
-- **[lsh](https://github.com/LilOleByte/lsh)** — minimal C shell that runs as PID 1 and ships as `/bin/sh`.
+- **[jvmlab-lsh](https://github.com/LilOleByte/jvmlab-lsh)** — minimal C shell that runs as PID 1 and ships as `/bin/sh`.
 
-`minimal.sh` clones `jvmlab-toybox` at build time; it can either clone `lsh` or use a local sibling checkout at `../lsh`. See "Supply chain & reproducibility" below and `LICENSES.md` for exact URLs, pinned versions, and checksums.
+`minimal.sh` clones `jvmlab-toybox` at build time. For `jvmlab-lsh` it prefers a local sibling checkout at `../jvmlab-lsh` (or legacy `../lsh`) and falls back to cloning `https://github.com/LilOleByte/jvmlab-lsh` when no sibling is present — so a fresh `git clone jvmlab-build && cd jvmlab-build && ./minimal.sh` "just works". See "Supply chain & reproducibility" below and `LICENSES.md` for exact URLs, pinned versions, and checksums.
 
 ## What the build does
 
@@ -18,7 +18,7 @@
 | **Linux** | Longterm 6.18.x from kernel.org | SHA256 pinned in `minimal.sh` |
 | **Syslinux** | 6.03 from kernel.org | SHA256 pinned in `minimal.sh` |
 | **jvmlab-toybox** | [LilOleByte/jvmlab-toybox](https://github.com/LilOleByte/jvmlab-toybox) | Git ref pinned via `JVMLAB_TOYBOX_REF` |
-| **lsh** | [LilOleByte/lsh](https://github.com/LilOleByte/lsh) (or `../lsh`) | Git ref pinned via `JVMLAB_LSH_REF` |
+| **jvmlab-lsh** | [LilOleByte/jvmlab-lsh](https://github.com/LilOleByte/jvmlab-lsh) (or `../jvmlab-lsh` / `../lsh`) | Git ref pinned via `JVMLAB_LSH_REF` |
 
 ## Userspace
 
@@ -40,7 +40,7 @@ Why this split instead of one big toybox/busybox:
 - **Easy to review** — short C files; two repos you can audit in an
   afternoon.
 
-Details: [jvmlab-toybox README](https://github.com/LilOleByte/jvmlab-toybox/blob/main/README.md), [lsh README](https://github.com/LilOleByte/lsh/blob/main/README.md).
+Details: [jvmlab-toybox README](https://github.com/LilOleByte/jvmlab-toybox/blob/main/README.md), [jvmlab-lsh README](https://github.com/LilOleByte/jvmlab-lsh/blob/main/README.md).
 
 ## Supply chain & reproducibility
 
@@ -73,6 +73,16 @@ pinned source:
 
 See [`LICENSES.md`](LICENSES.md) for the full component list with
 versions, licences, checksum sources, and the userspace pinning plan.
+
+## Threat model
+
+What the appliance defends against, what it explicitly does not, and
+how every flag in this repo traces back to a specific threat is in
+[`THREAT_MODEL.md`](THREAT_MODEL.md). Read it before proposing a
+change to the kernel config fragment, the userspace hardening flags,
+or the build pipeline — each of those is answering a numbered threat
+row, and changing one without updating the model is how a project
+loses its rubric.
 
 ## Kernel hardening profile
 
@@ -200,14 +210,14 @@ Optional. Example: `VAR=value ./minimal.sh`.
 | `JVMLAB_CC` | Compiler for **jvmlab-toybox only** (default `musl-gcc`). The kernel still uses your normal `gcc`. Example: `JVMLAB_CC=cc ./minimal.sh` for glibc userspace. |
 | `JVMLAB_TOYBOX_URL` | Git URL for jvmlab-toybox. Default: `https://github.com/LilOleByte/jvmlab-toybox.git`. |
 | `JVMLAB_TOYBOX_REF` | Branch, tag, or commit SHA to clone. Default: `main`. Pin to a tag or SHA for archival builds. |
-| `JVMLAB_LSH_URL` | Git URL for `lsh`. Unset (default) means "use `LSH_LOCAL`". |
-| `JVMLAB_LSH_REF` | Branch, tag, or commit SHA to clone when `JVMLAB_LSH_URL` is set. Default: `main`. |
-| `LSH_LOCAL` | Local sibling checkout used when `JVMLAB_LSH_URL` is unset. Default: `../lsh`. |
+| `JVMLAB_LSH_URL` | Git URL for jvmlab-lsh. Default: `https://github.com/LilOleByte/jvmlab-lsh.git`. Only used if `LSH_LOCAL` does not exist. Set to `''` to disable the clone fallback entirely. |
+| `JVMLAB_LSH_REF` | Branch, tag, or commit SHA to clone when falling back to `JVMLAB_LSH_URL`. Default: `main`. |
+| `LSH_LOCAL` | Local sibling checkout of jvmlab-lsh, preferred over cloning when present. Default: `../jvmlab-lsh`, then `../lsh` (legacy). |
 | `KERNEL_SHA256` | Override the pinned SHA256 for `linux-${KERNEL_VERSION}.tar.xz`. Only needed when bumping `KERNEL_VERSION`; grab the new value from `https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc`. |
 | `SYSLINUX_SHA256` | Override the pinned SHA256 for `syslinux-${SYSLINUX_VERSION}.tar.xz`. Source: `https://cdn.kernel.org/pub/linux/utils/boot/syslinux/sha256sums.asc`. |
 | `SOURCE_DATE_EPOCH` | Unix timestamp to stamp all build outputs with. Defaults to the commit time of HEAD in this checkout, or `1700000000` if not a git tree. Pin this to make two different checkouts build byte-identical ISOs. |
 
-jvmlab-toybox and `lsh` set their own hardening in their `Makefile`s; adjust `CFLAGS` / `LDFLAGS` there if needed.
+jvmlab-toybox and jvmlab-lsh set their own hardening in their `Makefile`s; adjust `CFLAGS` / `LDFLAGS` there if needed.
 
 The script sets `MAKEFLAGS=-j$JOBS` so jvmlab-toybox, the kernel, and other `make` steps share the same parallelism.
 

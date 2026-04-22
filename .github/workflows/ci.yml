@@ -30,11 +30,11 @@ jobs:
         with:
           path: jvmlab-build
 
-      - name: checkout lsh (sibling, for LSH_LOCAL)
+      - name: checkout jvmlab-lsh (sibling, for LSH_LOCAL)
         uses: actions/checkout@v4
         with:
-          repository: LilOleByte/lsh
-          path: lsh
+          repository: LilOleByte/jvmlab-lsh
+          path: jvmlab-lsh
 
       - name: install build + test deps
         run: |
@@ -90,11 +90,11 @@ jobs:
         with:
           path: jvmlab-build
 
-      - name: checkout lsh
+      - name: checkout jvmlab-lsh
         uses: actions/checkout@v4
         with:
-          repository: LilOleByte/lsh
-          path: lsh
+          repository: LilOleByte/jvmlab-lsh
+          path: jvmlab-lsh
 
       - name: install build deps
         run: |

@@ -40,12 +40,16 @@ Checksums for upstream tarballs are sourced from the signed
 - Shipped as: `/bin/jvmlab-toybox` (plus the `ls`, `cat`, `echo`, `pwd`,
   `mount`, `clear` symlinks) inside the initramfs.
 
-## lsh
+## jvmlab-lsh
 
-- Upstream: https://github.com/LilOleByte/lsh (or sibling checkout at
-  `../lsh` by default; see `LSH_LOCAL` / `JVMLAB_LSH_URL` in `minimal.sh`).
+- Upstream: https://github.com/LilOleByte/jvmlab-lsh (or sibling checkout
+  at `../jvmlab-lsh` / `../lsh`; see `LSH_LOCAL` / `JVMLAB_LSH_URL` in
+  `minimal.sh`).
 - Pinned ref: `main` (to be moved to a signed tag for release builds).
-- Licence: see `LICENSE` in the upstream repository.
+- Licence: 0BSD — a derivative of Stephen Brennan's original `lsh`
+  (released under the Unlicense, which explicitly permits relicensing
+  of derivatives). See `LICENSE` in the upstream repository for the
+  full text and attribution.
 - Shipped as: `/bin/lsh` and the `/bin/sh` symlink inside the initramfs.
   Runs as PID 1.
 
@@ -55,18 +59,18 @@ These live on the build host only; they never end up inside the ISO.
 
 | Tool       | Purpose                                           |
 |------------|---------------------------------------------------|
-| `musl-gcc` | Static C toolchain used for jvmlab-toybox / lsh.  |
+| `musl-gcc` | Static C toolchain used for jvmlab-toybox / jvmlab-lsh. |
 | `gcc`      | Host toolchain used to build the kernel.          |
 | `wget`     | Fetch upstream tarballs.                          |
 | `tar`      | Extract upstream tarballs.                        |
 | `cpio`     | Pack the initramfs (GNU cpio >= 2.12 required for `--reproducible`). |
 | `gzip`     | Compress the initramfs.                           |
 | `xorriso`  | Build the bootable ISO.                           |
-| `git`      | Clone `jvmlab-toybox` / `lsh` when not using a local checkout. |
+| `git`      | Clone `jvmlab-toybox` / `jvmlab-lsh` when not using a local checkout. |
 
 ## Pinning strategy for the userspace refs
 
-`jvmlab-toybox` and `lsh` are still tracked at `main` while the feature
+`jvmlab-toybox` and `jvmlab-lsh` are still tracked at `main` while the feature
 set stabilises. Before cutting a release:
 
 1. Tag each repository with a signed tag, e.g. `v0.1.0`.

@@ -51,13 +51,27 @@ JVMLAB_TOYBOX_URL=${JVMLAB_TOYBOX_URL:-https://github.com/LilOleByte/jvmlab-toyb
 JVMLAB_TOYBOX_REF=${JVMLAB_TOYBOX_REF:-main}
 JVMLAB_TOYBOX_DIR="${SCRIPT_DIR}/jvmlab-toybox-src"
 
-# `lsh` source selection. `lsh` ships as /bin/sh on the ISO. By default the
-# build uses a local sibling checkout at ../lsh (override with LSH_LOCAL).
-# Set JVMLAB_LSH_URL to clone instead.
-JVMLAB_LSH_URL=${JVMLAB_LSH_URL:-}
+# `jvmlab-lsh` source selection. lsh ships as /bin/sh on the ISO.
+# Canonical upstream is https://github.com/LilOleByte/jvmlab-lsh — the
+# build prefers a local sibling checkout (zero network, works in CI and
+# local dev) and falls back to cloning that URL if no sibling is found.
+# Set LSH_LOCAL to point at a specific tree, or JVMLAB_LSH_URL='' to
+# disable the clone fallback entirely.
+JVMLAB_LSH_URL=${JVMLAB_LSH_URL-https://github.com/LilOleByte/jvmlab-lsh.git}
 JVMLAB_LSH_REF=${JVMLAB_LSH_REF:-main}
 JVMLAB_LSH_DIR="${SCRIPT_DIR}/lsh-src"
-LSH_LOCAL=${LSH_LOCAL:-${SCRIPT_DIR}/../lsh}
+# LSH_LOCAL probes ../jvmlab-lsh (canonical repo name) first, then ../lsh
+# for legacy working-copy layouts. Either directory must contain lsh's
+# Makefile at its root.
+if [ -z "${LSH_LOCAL:-}" ]; then
+  if [ -d "${SCRIPT_DIR}/../jvmlab-lsh" ]; then
+    LSH_LOCAL="${SCRIPT_DIR}/../jvmlab-lsh"
+  elif [ -d "${SCRIPT_DIR}/../lsh" ]; then
+    LSH_LOCAL="${SCRIPT_DIR}/../lsh"
+  else
+    LSH_LOCAL="${SCRIPT_DIR}/../jvmlab-lsh"
+  fi
+fi
 
 # Userspace is built with musl by default (static, small). Only passed to jvmlab-toybox
 # and lsh make — do not export CC here or the kernel build may pick it up.
@@ -103,14 +117,17 @@ tar -xf syslinux.tar.xz
 rm -rf "$JVMLAB_TOYBOX_DIR"
 git clone --depth 1 --branch "$JVMLAB_TOYBOX_REF" "$JVMLAB_TOYBOX_URL" "$JVMLAB_TOYBOX_DIR"
 
-# Resolve lsh source: clone if URL given, else use the local sibling tree.
-if [ -n "$JVMLAB_LSH_URL" ]; then
+# Resolve jvmlab-lsh source: prefer the local sibling tree if present
+# (CI and local dev both supply one), else clone the pinned canonical URL.
+if [ -d "$LSH_LOCAL" ]; then
+  LSH_BUILD_DIR="$LSH_LOCAL"
+  printf 'minimal.sh: using local lsh tree at %s\n' "$LSH_BUILD_DIR"
+elif [ -n "$JVMLAB_LSH_URL" ]; then
   rm -rf "$JVMLAB_LSH_DIR"
   git clone --depth 1 --branch "$JVMLAB_LSH_REF" "$JVMLAB_LSH_URL" "$JVMLAB_LSH_DIR"
   LSH_BUILD_DIR="$JVMLAB_LSH_DIR"
 else
-  [ -d "$LSH_LOCAL" ] || die "no lsh source: set JVMLAB_LSH_URL or place lsh at $LSH_LOCAL"
-  LSH_BUILD_DIR="$LSH_LOCAL"
+  die "no lsh source: no local tree at $LSH_LOCAL and JVMLAB_LSH_URL is empty"
 fi
 
 mkdir -p "$ISO_DIR"
