@@ -44,38 +44,34 @@ Details: [jvmlab-toybox README](https://github.com/LilOleByte/jvmlab-toybox/blob
 
 ## Supply chain & reproducibility
 
-`minimal.sh` is written so every byte of `minimal.iso` is traceable to a
-pinned source:
+`minimal.sh` is written so every byte of `minimal.iso` is traceable to
+a pinned source, and the build is deterministic under a fixed
+toolchain:
 
 - **Upstream tarballs are verified.** The authoritative SHA256 for the
-  Linux and Syslinux tarballs is baked into `minimal.sh` (values sourced
-  from the signed `sha256sums.asc` files on `cdn.kernel.org`). A
-  mismatch is fatal and any cached tarball that doesn't match gets
+  Linux and Syslinux tarballs is baked into `minimal.sh` (values
+  sourced from the signed `sha256sums.asc` files on `cdn.kernel.org`).
+  A mismatch is fatal; any cached tarball that doesn't match gets
   re-downloaded.
-- **Git refs are explicit.** `jvmlab-toybox` and `lsh` are fetched at
-  the ref set by `JVMLAB_TOYBOX_REF` / `JVMLAB_LSH_REF`. For archival
-  builds set these to a commit SHA or signed tag, not `main`. See
-  `LICENSES.md` for the pinning strategy.
+- **Git refs are explicit.** `jvmlab-toybox` and `jvmlab-lsh` are
+  fetched at the ref set by `JVMLAB_TOYBOX_REF` / `JVMLAB_LSH_REF`;
+  for release builds pin these to a commit SHA or signed tag rather
+  than `main`. See `LICENSES.md` for the pinning strategy.
 - **Timestamps are deterministic.** The script honours
   `SOURCE_DATE_EPOCH` and exports `KBUILD_BUILD_TIMESTAMP`,
   `KBUILD_BUILD_USER`, `KBUILD_BUILD_HOST` for the kernel build. The
   cpio pack is sorted (`LC_ALL=C`), forced to `root:root`, stamped to
-  `SOURCE_DATE_EPOCH`, and uses `cpio --reproducible`. The gzip wrapper
-  uses `-n`. The ISO uses a fixed volume id (`JVMLAB`) and
-  `--modification-date` derived from `SOURCE_DATE_EPOCH`.
-- **Bit-identical rebuilds by construction.** Given the same source
-  commit and the same `SOURCE_DATE_EPOCH`, two independent runs of
-  `minimal.sh` produce byte-identical `rootfs.gz` and `minimal.iso`.
-  The CI workflow (`.github/workflows/ci.yml`) builds the ISO on every
-  push and publishes the SHA256 digests in the job summary, so anyone
-  rebuilding locally can compare against the published values. A
-  reproducibility diff job can be added later if divergence ever
-  becomes a concern; it was removed from CI because shared-runner
-  variance was costing more than it caught.
-- **Every build emits digests.** `minimal.sh` prints the SHA256 of
-  `minimal.iso`, `rootfs.gz`, and `bzImage` on completion, and the CI
-  summary also lists the ISO's xorriso metadata, initramfs file list,
-  and artefact sizes.
+  `SOURCE_DATE_EPOCH`, and uses `cpio --reproducible`. The gzip
+  wrapper uses `-n`. The ISO pins a fixed volume id (`JVMLAB`); xorriso
+  honours `SOURCE_DATE_EPOCH` for the modification date on its own.
+- **Digests on every build.** `minimal.sh` prints SHA256 of
+  `minimal.iso`, `rootfs.gz`, and `bzImage` on completion; CI uploads
+  an `artefact-digests.txt` and `artefact-info.md` (file listing,
+  sizes, ISO PVD) alongside the ISO.
+
+Build-host integrity — the toolchain, the runner, the maintainer —
+is assumed trusted and is the maintainer's responsibility; see
+[`THREAT_MODEL.md`](THREAT_MODEL.md) non-goals.
 
 See [`LICENSES.md`](LICENSES.md) for the full component list with
 versions, licences, checksum sources, and the userspace pinning plan.

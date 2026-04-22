@@ -59,13 +59,11 @@ jobs:
 
       - name: artefact info
         working-directory: jvmlab-build
-        # Generate a human-readable summary of what just got built:
-        # digests (reproducibility anchor), sizes, ISO metadata,
-        # kernel file(1) ident, and initramfs file list. Written to
-        # both the CI job summary (for easy reading in the GitHub UI)
-        # and to artefact-info.md inside the uploaded artifact.
-        # set +e on the informational subcommands so a non-fatal
-        # warning (e.g. xorriso stderr chatter) can't mask the build.
+        # Human-readable summary of what got built: digests, sizes, ISO
+        # metadata, kernel file(1) ident, initramfs listing. Written to
+        # the CI job summary and to artefact-info.md in the upload.
+        # Each informational subcommand is tolerant of failure so a
+        # chatty warning cannot mask a real build error.
         run: |
           sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage \
             > artefact-digests.txt

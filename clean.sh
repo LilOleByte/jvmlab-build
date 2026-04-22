@@ -8,4 +8,4 @@ cd "$(dirname "$0")" || exit 1
 rm -rf rootfs isoimage linux-* syslinux-* jvmlab-toybox-src lsh-src *.iso
 
 rm -f kernel.tar.xz syslinux.tar.xz jvmlab-toybox.tar.gz \
-      artefact-digests.txt
+      artefact-digests.txt artefact-info.md

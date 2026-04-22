@@ -59,8 +59,8 @@ Phase 3.1 = userspace, Phase 3.2 = verifiable boot).
 
 | # | Threat | Assets | Defence | Status |
 |---|--------|--------|---------|--------|
-| Th-1 | User can't verify the ISO matches CI's build. | A1 | CI publishes SHA256 of `minimal.iso`, `rootfs.gz`, `bzImage` on every build (`minimal.sh` prints them on completion; CI uploads `artefact-digests.txt`). | In place (Phase 1). |
-| Th-2 | Two fresh checkouts produce different ISOs. | A2 | `SOURCE_DATE_EPOCH` + sorted + `root:root` + `cpio --reproducible` + `gzip -n` for the initramfs; xorriso honours `SOURCE_DATE_EPOCH` for the ISO; `KBUILD_BUILD_*` pinned for the kernel. CI publishes SHA256 digests on every build; anyone can rebuild locally at the same commit / `SOURCE_DATE_EPOCH` and compare. | In place (Phase 1). |
+| Th-1 | User can't tell if the downloaded ISO is the file CI built. | A1 | CI publishes SHA256 of `minimal.iso`, `rootfs.gz`, `bzImage` on every build (`minimal.sh` prints them on completion; CI uploads `artefact-digests.txt`). Users compare out-of-band. | In place (Phase 1). |
+| Th-2 | Two fresh checkouts produce different ISOs. | A2 | `SOURCE_DATE_EPOCH` + sorted + `root:root` + `cpio --reproducible` + `gzip -n` for the initramfs; xorriso honours `SOURCE_DATE_EPOCH` for the ISO; `KBUILD_BUILD_*` pinned for the kernel. Deterministic under a fixed toolchain — build-host integrity itself is a maintainer responsibility (non-goals). | In place (Phase 1). |
 | Th-3 | Tampered kernel or syslinux tarball on the build host. | A2 | SHA256 of both tarballs pinned in `minimal.sh`; values sourced from kernel.org's signed `sha256sums.asc`; `fetch()` aborts on mismatch. | In place (Phase 1). |
 | Th-4 | Tampered `jvmlab-toybox` or `jvmlab-lsh` source. | A2 | Git refs pinned via `JVMLAB_TOYBOX_REF` / `JVMLAB_LSH_REF`; for release builds the pin is a commit SHA. Full plan documented in `LICENSES.md` ("Pinning strategy"). | Partial — currently tracks `main`; moving refs to signed tags is tracked as a Phase 1 follow-up. |
 | Th-5 | A local bug in the kernel is exploited from userspace. | A3 | Attack-surface fragment (`configs/x86_64-minimal.config`) removes `CONFIG_NET`, `CONFIG_MODULES`, `CONFIG_USER_NS`, `CONFIG_IO_URING`, `CONFIG_BPF_SYSCALL`, `CONFIG_KPROBES/UPROBES`, `CONFIG_DEVMEM/DEVPORT`, `CONFIG_MAGIC_SYSRQ`, legacy syscall paths. Self-protection enables KASLR, stack canaries, `HARDENED_USERCOPY`, `INIT_ON_ALLOC/FREE`, `INIT_STACK_ALL_ZERO`, `SLAB_FREELIST_HARDENED`, `STRICT_KERNEL_RWX`, `SECURITY_YAMA`, `SECURITY_DMESG_RESTRICT`. | In place (Phase 2). |
@@ -69,8 +69,7 @@ Phase 3.1 = userspace, Phase 3.2 = verifiable boot).
 | Th-8 | An attacker substitutes `minimal.iso` in transit. | A1 | Currently: user must verify the published SHA256 out-of-band (visible on the CI run summary). | Partial. Closes fully with Th-9. |
 | Th-9 | User runs a wrong-but-plausibly-signed ISO. | A1 | Planned: sign the ISO + kernel image with a project key; publish the public key alongside the recipe; document how to verify. | **Not in place yet — Phase 3.2.** |
 | Th-10 | Malicious firmware / DMA device tampers with the running kernel at boot. | A3 | Planned: Secure Boot chain, `efi_stub` kernel, or a shim that verifies the kernel signature before jumping. Today nothing stops this. | **Not in place yet — Phase 3.2.** |
-| Th-11 | The build host is backdoored (T7). | A2, A4 | Partial: reproducible builds mean two independent builders can compare SHAs and notice a divergence. No full defence (a truly compromised toolchain can backdoor both). Mitigation direction: publish builds from two independent CI providers and diff. | Partial (reproducibility gives us the primitive). |
-| Th-12 | A local user gets root and tries to persist. | A3 | No writable root; initramfs lives in tmpfs; rebooting restores pristine state. `CONFIG_MODULES=n` blocks LKM persistence paths. | In place (design). |
+| Th-11 | A local user gets root and tries to persist. | A3 | No writable root; initramfs lives in tmpfs; rebooting restores pristine state. `CONFIG_MODULES=n` blocks LKM persistence paths. | In place (design). |
 
 ## 5. Explicit non-goals
 
@@ -97,30 +96,32 @@ impossible.
 - **Users escalating past the kernel.** We reduce exploitability; we
   don't claim unexploitability. Zero-days in the retained kernel
   surface (filesystems, devtmpfs, VM, syscall entry) remain possible.
+- **Build-host integrity.** The maintainer's toolchain (`gcc`,
+  `musl-gcc`, `ld`, `cpio`, `gzip`, `xorriso`) and the CI runner are
+  trusted. A backdoored toolchain or a compromised maintainer
+  machine can ship a trojaned ISO, and reproducible builds alone
+  can't detect it. Keeping the build host clean is a maintainer
+  responsibility, not a user-facing defence; trusting-trust
+  mitigations (diverse double compilation, bootstrapped compilers,
+  multi-provider CI diffs) are out of scope for a single-maintainer
+  educational project.
 
 ## 6. Validation checklist
 
 A maintainer can convince themselves this model is real by running,
 in order:
 
-1. `./minimal.sh` locally. Last line prints SHA256 triplet.
-2. Compare those SHAs to the CI run that built the same commit
-   (job summary + `artefact-digests.txt` inside the uploaded
-   artifact). They must match byte-for-byte when `SOURCE_DATE_EPOCH`
-   matches.
-3. Rebuild the same commit a second time locally (or on a second
-   machine) and diff the digests. Mismatch = unreproducibility bug,
-   open an issue before trusting the ISO.
-4. Against the installed binaries:
+1. `./minimal.sh` locally. Last line prints the SHA256 triplet.
+2. Against the installed binaries:
    `file jvmlab-lsh/lsh jvmlab-toybox/jvmlab-toybox` reports
    `ELF 64-bit LSB pie executable ... statically linked`.
-5. `readelf -d` on each binary shows `BIND_NOW` in `FLAGS_1` (full
+3. `readelf -d` on each binary shows `BIND_NOW` in `FLAGS_1` (full
    RELRO).
-6. `readelf -l` on each shows `GNU_STACK` is `RW ` (no `E`).
-7. In QEMU: boot the ISO, confirm `cat /proc/1/comm` reports `lsh`.
+4. `readelf -l` on each shows `GNU_STACK` is `RW ` (no `E`).
+5. In QEMU: boot the ISO, confirm `cat /proc/1/comm` reports `lsh`.
    `cat /proc/1/status | grep -i cap` shows a fully privileged PID 1
    (expected: single-user appliance, no capability split claimed).
-8. In the kernel: `zgrep '^CONFIG_MODULES' /proc/config.gz`
+6. In the kernel: `zgrep '^CONFIG_MODULES' /proc/config.gz`
    returns nothing (because the config is not exposed; the point is
    that `modprobe` does not exist in the image and `finit_module(2)`
    returns `-ENOSYS`). Alternative: `strace -e finit_module /bin/sh -c :`
@@ -129,7 +130,7 @@ in order:
 ## 7. When to revise this document
 
 - Any time a `CONFIG_` flag in `configs/x86_64-minimal.config` is
-  added, removed, or flipped: update Th-5 and re-run step 7.
+  added, removed, or flipped: update Th-5 and re-run step 5.
 - Any time a toolchain flag in `jvmlab-lsh/Makefile` or
   `jvmlab-toybox/Makefile` changes: update Th-7.
 - Any time the ISO gains a new component (second binary, a config
