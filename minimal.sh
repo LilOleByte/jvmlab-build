@@ -77,6 +77,61 @@ fi
 # and lsh make — do not export CC here or the kernel build may pick it up.
 JVMLAB_CC=${JVMLAB_CC:-musl-gcc}
 
+# Force static userspace. Some toolchains accept -static-pie but still
+# emit a dynamically-linked PIE (with PT_INTERP) if the linker can't
+# actually do static PIE on the host. That will boot-panic because the
+# initramfs does not ship a dynamic loader. Probe the toolchain once
+# and pick working flags.
+JVMLAB_LDFLAGS=${JVMLAB_LDFLAGS:-}
+has_interp() {
+  # Returns 0 if binary has a PT_INTERP (dynamic loader), else 1.
+  # Prefer readelf when available; fall back to file(1).
+  bin=$1
+  if command -v readelf >/dev/null 2>&1; then
+    readelf -l "$bin" 2>/dev/null | grep -q 'Requesting program interpreter'
+    return $?
+  fi
+  if command -v file >/dev/null 2>&1; then
+    file "$bin" 2>/dev/null | grep -qi 'interpreter'
+    return $?
+  fi
+  return 0
+}
+probe_static_ldflags() {
+  # Echo working static link flags, or return nonzero.
+  tmpd=$(mktemp -d 2>/dev/null || printf '%s\n' "${SCRIPT_DIR}/.tmp-probe.$$") || return 1
+  mkdir -p "$tmpd" || return 1
+  cat >"$tmpd/t.c" <<'EOF'
+int main(void) { return 0; }
+EOF
+  # Try static PIE first (best). Then try plain static *without* PIE.
+  # Some toolchains error out if you combine -fPIE with -static.
+  if "$JVMLAB_CC" -Os -fPIE -o "$tmpd/t" "$tmpd/t.c" -static-pie >/dev/null 2>&1; then
+    if ! has_interp "$tmpd/t"; then
+      rm -rf "$tmpd"
+      printf '%s\n' "-static-pie"
+      return 0
+    fi
+  fi
+
+  # Plain static fallbacks.
+  for f in "-static" "-static -no-pie" "-static -fno-pie"; do
+    # shellcheck disable=SC2086 # we intentionally split flags
+    if "$JVMLAB_CC" -Os -o "$tmpd/t" "$tmpd/t.c" $f >/dev/null 2>&1; then
+      if ! has_interp "$tmpd/t"; then
+        rm -rf "$tmpd"
+        printf '%s\n' "$f"
+        return 0
+      fi
+    fi
+  done
+  rm -rf "$tmpd"
+  return 1
+}
+if [ -z "$JVMLAB_LDFLAGS" ]; then
+  JVMLAB_LDFLAGS=$(probe_static_ldflags) || die "toolchain cannot produce static binaries (tried -static-pie/-static). Install musl-tools and binutils, or set JVMLAB_CC/JVMLAB_LDFLAGS."
+fi
+
 ISO_DIR="${SCRIPT_DIR}/isoimage"
 ROOTFS_DIR="${SCRIPT_DIR}/rootfs"
 OUT_ISO="${SCRIPT_DIR}/minimal.iso"
@@ -133,9 +188,20 @@ fi
 mkdir -p "$ISO_DIR"
 
 command -v "$JVMLAB_CC" >/dev/null 2>&1 || die "need '${JVMLAB_CC}' for jvmlab-toybox and lsh (e.g. pacman -S musl, or apt install musl-tools)"
-make -C "$JVMLAB_TOYBOX_DIR" "CC=${JVMLAB_CC}"
+make -C "$JVMLAB_TOYBOX_DIR" "CC=${JVMLAB_CC}" "LDFLAGS=${JVMLAB_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -Wl,--gc-sections"
 make -C "$LSH_BUILD_DIR" clean
-make -C "$LSH_BUILD_DIR" "CC=${JVMLAB_CC}"
+make -C "$LSH_BUILD_DIR" "CC=${JVMLAB_CC}" "LDFLAGS=${JVMLAB_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -Wl,--gc-sections"
+
+# Sanity-check the userspace binaries we are about to ship. A common
+# cause of "attempted to kill init" is /bin/sh failing to exec because
+# it ended up dynamically linked (missing loader inside the initramfs).
+if command -v file >/dev/null 2>&1; then
+  # Accept both classic static and static PIE wording from file(1).
+  file "$JVMLAB_TOYBOX_DIR/jvmlab-toybox" | grep -Eqi 'statically linked|static-pie' \
+    || die "jvmlab-toybox is not statically linked; install musl-tools or fix toolchain: $JVMLAB_TOYBOX_DIR/jvmlab-toybox"
+  file "$LSH_BUILD_DIR/lsh" | grep -Eqi 'statically linked|static-pie' \
+    || die "lsh is not statically linked; install musl-tools or fix toolchain: $LSH_BUILD_DIR/lsh"
+fi
 
 rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR/bin" "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys"
@@ -163,12 +229,35 @@ chmod +x "$ROOTFS_DIR/init"
 # cpio --reproducible (renumbered inodes, zeroed devno), and gzip -n to
 # drop the gzip header timestamp+filename. Result is byte-identical
 # across hosts for a given source tree.
-( cd "$ROOTFS_DIR" \
-  && find . -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} + \
-  && find . -print0 \
-     | LC_ALL=C sort -z \
-     | cpio --null --reproducible -R root:root -H newc -o 2>/dev/null \
-     | gzip -n -9 > "${ISO_DIR}/rootfs.gz" )
+(
+  cd "$ROOTFS_DIR" || exit 1
+  find . -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
+
+  # Avoid a pipeline here: POSIX sh lacks pipefail, so a failing cpio
+  # can otherwise be masked by a successful gzip of an empty stream.
+  # We first write a cpio archive, then gzip it, and sanity-check that
+  # the result is non-empty.
+  find . -print0 \
+    | LC_ALL=C sort -z \
+    | cpio --null --reproducible -R root:root -H newc -o > "${ISO_DIR}/rootfs.cpio"
+
+  gzip -n -9 < "${ISO_DIR}/rootfs.cpio" > "${ISO_DIR}/rootfs.gz"
+  rm -f "${ISO_DIR}/rootfs.cpio"
+)
+
+[ -s "${ISO_DIR}/rootfs.gz" ] || die "initramfs missing/empty: ${ISO_DIR}/rootfs.gz"
+
+# Sanity-check the packed initramfs contains the expected entrypoints.
+# Avoid pipelines (no pipefail in POSIX sh): unpack to a temp cpio first.
+TMP_CPIO="${ISO_DIR}/.rootfs-check.cpio"
+gzip -dc "${ISO_DIR}/rootfs.gz" > "$TMP_CPIO" || die "cannot decompress initramfs: ${ISO_DIR}/rootfs.gz"
+cpio -t < "$TMP_CPIO" > "${ISO_DIR}/.rootfs-check.list" 2>/dev/null || die "initramfs is not valid cpio: ${ISO_DIR}/rootfs.gz"
+rm -f "$TMP_CPIO"
+# GNU cpio may list entries as "init" or "./init" depending on flags/version.
+grep -Eqx '(\./)?init' "${ISO_DIR}/.rootfs-check.list" || die "initramfs missing init (pack failure)"
+grep -Eqx '(\./)?bin/lsh' "${ISO_DIR}/.rootfs-check.list" || die "initramfs missing bin/lsh (pack failure)"
+grep -Eqx '(\./)?bin/sh' "${ISO_DIR}/.rootfs-check.list" || die "initramfs missing bin/sh (pack failure)"
+rm -f "${ISO_DIR}/.rootfs-check.list"
 
 cd "${SCRIPT_DIR}/linux-${KERNEL_VERSION}" || die "missing kernel tree"
 make mrproper defconfig
@@ -192,6 +281,8 @@ make bzImage
 cp arch/x86/boot/bzImage "${ISO_DIR}/bzImage"
 
 cd "$ISO_DIR" || die "missing iso dir"
+[ -s ./bzImage ] || die "missing kernel image in iso dir: ${ISO_DIR}/bzImage"
+[ -s ./rootfs.gz ] || die "missing initramfs in iso dir: ${ISO_DIR}/rootfs.gz"
 cp "${SCRIPT_DIR}/syslinux-${SYSLINUX_VERSION}/bios/core/isolinux.bin" .
 cp "${SCRIPT_DIR}/syslinux-${SYSLINUX_VERSION}/bios/com32/elflink/ldlinux/ldlinux.c32" .
 
