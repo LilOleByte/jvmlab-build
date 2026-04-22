@@ -1,0 +1,131 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly rebuild catches upstream toolchain / mirror drift even when
+    # nobody's pushing code.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+# Prevent concurrent duplicate runs for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build + boot-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: checkout jvmlab-build
+        uses: actions/checkout@v4
+        with:
+          path: jvmlab-build
+
+      - name: checkout lsh (sibling, for LSH_LOCAL)
+        uses: actions/checkout@v4
+        with:
+          repository: LilOleByte/lsh
+          path: lsh
+
+      - name: install build + test deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio flex gzip libelf-dev libssl-dev \
+            musl-tools qemu-system-x86 wget xorriso
+
+      - name: cache upstream tarballs
+        uses: actions/cache@v4
+        with:
+          path: |
+            jvmlab-build/kernel.tar.xz
+            jvmlab-build/syslinux.tar.xz
+          # Keyed on the pinned checksums so any version bump bypasses
+          # the stale cache automatically.
+          key: tarballs-${{ hashFiles('jvmlab-build/minimal.sh') }}
+
+      - name: build minimal.iso
+        working-directory: jvmlab-build
+        run: ./minimal.sh
+
+      - name: print artefact digests
+        working-directory: jvmlab-build
+        run: |
+          sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage \
+            | tee artefact-digests.txt
+
+      - name: boot-smoke (QEMU, headless)
+        working-directory: jvmlab-build
+        run: ./ci/boot-smoke.sh minimal.iso
+
+      - name: upload ISO + digests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvmlab-iso-${{ github.sha }}
+          path: |
+            jvmlab-build/minimal.iso
+            jvmlab-build/artefact-digests.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  reproducibility:
+    name: bit-identical rebuild
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: checkout jvmlab-build
+        uses: actions/checkout@v4
+        with:
+          path: jvmlab-build
+
+      - name: checkout lsh
+        uses: actions/checkout@v4
+        with:
+          repository: LilOleByte/lsh
+          path: lsh
+
+      - name: install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio flex gzip libelf-dev libssl-dev \
+            musl-tools wget xorriso
+
+      # Two independent builds from the same source tree (different
+      # parallelism, different tmp, different locale) must produce the
+      # same rootfs.gz and the same minimal.iso byte-for-byte.
+      - name: build run A
+        working-directory: jvmlab-build
+        env:
+          JOBS: '2'
+        run: |
+          ./minimal.sh
+          sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage > ../run-a.sha256
+          ./clean
+
+      - name: build run B
+        working-directory: jvmlab-build
+        env:
+          JOBS: '4'
+          LC_ALL: C.UTF-8
+        run: |
+          ./minimal.sh
+          sha256sum minimal.iso isoimage/rootfs.gz isoimage/bzImage > ../run-b.sha256
+
+      - name: diff digests
+        run: |
+          echo '== run A =='; cat run-a.sha256
+          echo '== run B =='; cat run-b.sha256
+          diff -u run-a.sha256 run-b.sha256
